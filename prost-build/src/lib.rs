@@ -508,7 +508,10 @@ impl Config {
     /// ```rust,no_run,ignore
     /// include!(concat!(env!("OUT_DIR"), "/_includes.rs"));
     /// ```
-    pub fn include_file<P>(&mut self, path: P) -> &mut Self where P: Into<PathBuf> {
+    pub fn include_file<P>(&mut self, path: P) -> &mut Self
+    where
+        P: Into<PathBuf>,
+    {
         self.include_file = Some(path.into());
         self
     }
@@ -534,13 +537,20 @@ impl Config {
     where
         P: AsRef<Path>,
     {
+        trace!("Starting proto compilation");
         let mut target_is_env = false;
         let target: PathBuf = self.out_dir.clone().map(Ok).unwrap_or_else(|| {
             env::var_os("OUT_DIR")
-                .ok_or_else(|| Error::new(ErrorKind::Other,
-                                          "OUT_DIR environment variable is not set"))
-                .map(|val| { target_is_env = true; Into::into(val) })
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::Other, "OUT_DIR environment variable is not set")
+                })
+                .map(|val| {
+                    target_is_env = true;
+                    Into::into(val)
+                })
         })?;
+
+        trace!("Target: {:?}", target.clone());
 
         // TODO: This should probably emit 'rerun-if-changed=PATH' directives for cargo, however
         // according to [1] if any are output then those paths replace the default crate root,
@@ -577,9 +587,11 @@ impl Config {
             ));
         }
 
+        trace!("descriptor_set: {:?}", descriptor_set.clone());
         let buf = fs::read(descriptor_set)?;
         let descriptor_set = FileDescriptorSet::decode(&*buf)?;
 
+        trace!("decoded file descriptor set");
         let modules = self.generate(descriptor_set.file)?;
         for (module, content) in &modules {
             let mut filename = module.join(".");
@@ -603,33 +615,67 @@ impl Config {
         if let Some(ref include_file) = self.include_file {
             trace!("Writing include file: {:?}", target.join(include_file));
             let mut file = fs::File::create(target.join(include_file))?;
-            self.write_includes(modules.keys().collect(), &mut file, 0, if target_is_env { None } else { Some(&target) })?;
+            self.write_includes(
+                modules.keys().collect(),
+                &mut file,
+                0,
+                if target_is_env { None } else { Some(&target) },
+            )?;
             file.flush()?;
         }
 
         Ok(())
     }
 
-    fn write_includes(&self, mut entries: Vec<&Module>, outfile: &mut fs::File, depth: usize, basepath: Option<&PathBuf>) -> Result<usize> {
+    fn write_includes(
+        &self,
+        mut entries: Vec<&Module>,
+        outfile: &mut fs::File,
+        depth: usize,
+        basepath: Option<&PathBuf>,
+    ) -> Result<usize> {
         let mut written = 0;
         while entries.len() > 0 {
             let modident = &entries[0][depth];
-            let matching: Vec<&Module> = entries.iter().filter(|&v| &v[depth] == modident).map(|v| *v).collect();
+            let matching: Vec<&Module> = entries
+                .iter()
+                .filter(|&v| &v[depth] == modident)
+                .map(|v| *v)
+                .collect();
             {
                 // Will NLL sort this mess out?
-                let _temp = entries.drain(..).filter(|&v| &v[depth] != modident).collect();
+                let _temp = entries
+                    .drain(..)
+                    .filter(|&v| &v[depth] != modident)
+                    .collect();
                 entries = _temp;
             }
             self.write_line(outfile, depth, &format!("pub mod {} {{", modident))?;
-            let subwritten = self.write_includes(matching.iter().filter(|v| v.len() > depth + 1).map(|v| *v).collect(),
-                                                 outfile, depth + 1, basepath)?;
+            let subwritten = self.write_includes(
+                matching
+                    .iter()
+                    .filter(|v| v.len() > depth + 1)
+                    .map(|v| *v)
+                    .collect(),
+                outfile,
+                depth + 1,
+                basepath,
+            )?;
             written += subwritten;
             if subwritten != matching.len() {
                 let modname = matching[0][..=depth].join(".");
                 if let Some(_buf) = basepath {
-                    self.write_line(outfile, depth + 1, &format!("include!(\"{}.rs\");", modname))?;
+                    self.write_line(
+                        outfile,
+                        depth + 1,
+                        &format!("include!(\"{}.rs\");", modname),
+                    )?;
                 } else {
-                    self.write_line(outfile, depth + 1, &format!("include!(concat!(env!(\"OUT_DIR\"), \"/{}.rs\"));", modname))?;
+                    self.write_line(
+                        outfile,
+                        depth + 1,
+                        &format!("include!(concat!(env!(\"OUT_DIR\"), \"/{}.rs\"));", modname),
+                    )?;
                 }
                 written += 1;
             }
