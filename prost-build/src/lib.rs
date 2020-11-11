@@ -563,6 +563,7 @@ impl Config {
 
         trace!("Created temp directory");
         trace!("Descriptor Set: {:?}", descriptor_set.clone());
+        trace!("PROTOC: {:?}", protoc());
 
         let mut cmd = Command::new(protoc());
         cmd.arg("--include_imports")
