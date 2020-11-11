@@ -561,6 +561,9 @@ impl Config {
         let tmp = tempfile::Builder::new().prefix("prost-build").tempdir()?;
         let descriptor_set = tmp.path().join("prost-descriptor-set");
 
+        trace!("Created temp directory");
+        trace!("Descriptor Set: {:?}", descriptor_set.clone());
+
         let mut cmd = Command::new(protoc());
         cmd.arg("--include_imports")
             .arg("--include_source_info")
@@ -579,7 +582,11 @@ impl Config {
             cmd.arg(proto.as_ref());
         }
 
-        let output = cmd.output()?;
+        let output = cmd.output().map_err(|e| {
+            trace!("failed protoc command {:?}", cmd);
+            e
+        }).expect("protoc failed");
+
         if !output.status.success() {
             return Err(Error::new(
                 ErrorKind::Other,
